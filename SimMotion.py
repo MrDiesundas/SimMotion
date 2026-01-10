@@ -9,6 +9,12 @@ Refactored for MMF-based MotionCompensation:
 History:
 V3.0 - 10.01.2025 - JOMU
     - initial commit
+V3.0.1 - 10.01.2025:
+    - minor status text adaptation
+    - robuster stop methode in xplane_listener
+    - test scripts for all modules src/test_....py
+    - COMPILE.bat -> to compile SimMotion
+    - DEVELOPMENT Flag to compile ui during development
 """
 
 import sys
@@ -33,10 +39,10 @@ from src.maxflightstick import FlightStick
 from src.key_helper import KeyHelper, VK_CONTROL, VK_INSERT
 
 
-VERSION = "3.0 - 02.01.2026"
+VERSION = "3.0.1 - 10.01.2026"
 BAUD_RATE = 115200
 CONFIG_FILE = "config.ini"
-
+DEVELOPMENT = False
 # ------------------- START UI COMPILATION --------------------
 import subprocess
 from pathlib import Path
@@ -59,7 +65,8 @@ def compile_if_needed(ui: Path, py: Path):
         print("UI unchanged, skipping compilation")
 
 # Call it
-compile_if_needed(UI_FILE, PY_FILE)
+if DEVELOPMENT:
+    compile_if_needed(UI_FILE, PY_FILE)
 # ------------------- END UI COMPILATION --------------------
 
 from ui_SimMotion import Ui_SimMotion # the generated file
@@ -337,7 +344,7 @@ class MyWindow(QMainWindow):
             self.connection_disconnect_all()
             self.connected = False
             self.ui.btn_connect.setText("Connect")
-            self.update_status("Disconnected")
+            # self.update_status("Disconnected")
 
     def _connect_all(self):
         try:
@@ -389,7 +396,7 @@ class MyWindow(QMainWindow):
         # GUI receives incoming telemetry to display in GUI
         self.simulator.incoming_signal.connect(self.gui_update_incoming)  
         self.simulator.start()
-        self.update_status("X-Plane connected", "green")
+        self.update_status("Simulation software connected", "green")
 
     def _start_msfs_listener(self):
         self.update_status("Starting MSFS2024 listener...")
@@ -454,8 +461,10 @@ class MyWindow(QMainWindow):
 
         # 2) Stop simulator listener (XPlane or MSFS)
         if self.simulator is not None:
+            sim = self.ui.cmb_sim_software.currentText().lower()
             try:
                 self.simulator.stop()
+                self.update_status(f"{sim} disconnected")
             except Exception as e:
                 self.update_status(f"Simulator listener stop error: {e}", "red")
             self.simulator = None
@@ -465,6 +474,7 @@ class MyWindow(QMainWindow):
             try:
                 # MotionPlatform has no .stop(), only disconnect()
                 self.motion_platform.disconnect()
+                self.update_status("motion platform disconnected")
             except Exception as e:
                 self.update_status(f"MotionPlatform disconnect error: {e}", "red")
             self.motion_platform = None
@@ -474,6 +484,7 @@ class MyWindow(QMainWindow):
             try:
                 self.wit_sensor.stop_listening()
                 self.wit_sensor.disconnect()
+                self.update_status("IMU disconnected")
             except Exception as e:
                 self.update_status(f"WitMotion disconnect error: {e}", "red")
             self.wit_sensor = None
@@ -484,11 +495,12 @@ class MyWindow(QMainWindow):
                 self.button7_pressed.disconnect()
                 self.button9_pressed.disconnect()
                 self.stick.close()
+                self.update_status("FlightStick disconnected")
             except Exception as e:
                 self.update_status(f"FlightStick disconnect error: {e}", "red")
             self.stick = None
 
-        self.update_status("Disconnected")
+        self.update_status("Bye Bye")
 
     # ---------------- status & motion toggle ----------------
 

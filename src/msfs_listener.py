@@ -80,7 +80,7 @@ class MSFSListener(QThread):
 
     # ---------- helpers ----------
 
-    def _status(self, txt, color=None):
+    def _status(self, txt, color="white"):
         self.status_callback(txt, color or "")
 
     def _connect(self):
@@ -101,9 +101,26 @@ class MSFSListener(QThread):
 
     # ---------- lifecycle ----------
 
-    def stop(self):
+    def stop_OLD(self):
         self.stop_event.set()
         self.wait()
+
+    def stop(self):
+        # 1) Signal thread to stop
+        self.stop_event.set()
+
+        # 2) Wait for thread to finish
+        self.wait()
+
+        # 3) Now it is safe to disconnect SimConnect
+        try:
+            if self.sm:
+                self.sm.exit()
+        except:
+            pass
+
+        self.sm = None
+        self.mf = None
 
     # ---------- main loop with auto-reconnect ----------
 
@@ -122,7 +139,8 @@ class MSFSListener(QThread):
             except Exception as e:
                 self._status(f"ERROR in MSFS listener loop: {e}", "red")
 
-            self._disconnect()
+            # REMOVED 10.1.2026
+            # self._disconnect()
             if self.stop_event.is_set():
                 break
             if self.stop_event.wait(self.reconnect_delay):

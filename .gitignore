@@ -6,7 +6,6 @@ dist/
 old/
 sandbox.py
 temp*
-test*
 .idea/
 *.bak
 *.spec

@@ -50,6 +50,24 @@ class XPlaneListener(QObject):
         self.thread.start()
 
     def stop(self, timeout=1.0):
+        # Signal thread to stop
+        self.stop_event.set()
+
+        # Wait for thread to finish
+        if self.thread and self.thread.is_alive():
+            self.thread.join(timeout=timeout)
+
+        # Now it is safe to close the socket
+        if self.sock:
+            try:
+                self.sock.close()
+            except Exception:
+                pass
+
+        self.thread = None
+        self.sock = None
+
+    def stop_OLD(self, timeout=1.0):
         if self.sock:
             try:
                 self.sock.settimeout(0.1)

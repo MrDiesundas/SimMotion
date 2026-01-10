@@ -70,7 +70,7 @@ class MotionPlatform(QObject):
     # Build Teensy packet
     # ---------------------------------------------------------
     def _build_packet(self, corr):
-        return (
+        packet = (
             f"X;"
             f"pitch={corr['pitch_converted']:.2f};"
             f"pitch_rate={corr['pitch_rate_converted']:.2f};"
@@ -80,6 +80,7 @@ class MotionPlatform(QObject):
             f"yaw_rate={corr['yaw_rate_converted']:.2f};"
             f"airspeed={corr['airspeed']:.2f}\n"
         )
+        return packet
 
     # ---------------------------------------------------------
     # High‑frequency telemetry stream
