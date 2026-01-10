@@ -1,3 +1,16 @@
+# JOMU
+.venv/
+_development/
+build/
+dist/
+old/
+sandbox.py
+temp*
+test*
+.idea/
+*.bak
+*.spec
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
