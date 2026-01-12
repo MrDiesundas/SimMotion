@@ -19,6 +19,10 @@ v3.0.2 - 12.01.2025:
     - minor adaptation in motion_start_homing, using now stream_to_platform flag
     - fix update_sliders_from_response float issue
     - motion_power_toggle -> reset homing_done flag
+v3.0.3 - 12.01.2025:
+    - adapt MSFSListener class with a interpolator (had doupt in frame rate)
+    - adapt MotionPlatform class with filter for sending telemetry
+    - fix in SimMotion save cmb_sim_software (was absent)
 """
 
 import sys
@@ -43,7 +47,7 @@ from src.maxflightstick import FlightStick
 from src.key_helper import KeyHelper, VK_CONTROL, VK_INSERT
 
 
-VERSION = "3.0.2 - 12.01.2026"
+VERSION = "3.0.3 - 12.01.2026"
 BAUD_RATE = 115200
 CONFIG_FILE = "config.ini"
 DEVELOPMENT = True
@@ -295,6 +299,7 @@ class MyWindow(QMainWindow):
         f["ckb_roll_axes"] = "1" if self.ui.ckb_roll_axes.isChecked() else "0"
         f["ckb_yaw_axes"] = "1" if self.ui.ckb_yaw_axes.isChecked() else "0"
 
+        f["cmb_sim_software"] = self.ui.cmb_sim_software.currentText()
         f["cmb_serial_motion"] = self.ui.cmb_serial_motion.currentText()
         f["cmb_serial_imu"] = self.ui.cmb_serial_imu.currentText()
         f["txt_sim_ip"] = self.ui.txt_sim_ip.text()
@@ -778,30 +783,15 @@ class MyWindow(QMainWindow):
         # Outgoing telemetry (motion platform)
         if self.latest_outgoing:
             data = self.latest_outgoing
-            self.ui.lbl_motion_update.setText(
-                f"{data.get('packet_count', 0):.0f}"
-            )
-            self.ui.lbl_motion_timestamp.setText(
-                datetime.now().strftime("%H:%M:%S")
-            )
-            self.ui.lbl_motion_pitch.setText(
-                f"{data.get('pitch_converted', 0):.2f}"
-            )
-            self.ui.lbl_motion_pitch_rate.setText(
-                f"{data.get('pitch_rate_converted', 0):.2f}"
-            )
-            self.ui.lbl_motion_roll.setText(
-                f"{data.get('roll_converted', 0):.2f}"
-            )
-            self.ui.lbl_motion_roll_rate.setText(
-                f"{data.get('roll_rate_converted', 0):.2f}"
-            )
-            self.ui.lbl_motion_yaw.setText(
-                f"{data.get('yaw_converted', 0):.2f}"
-            )
-            self.ui.lbl_motion_yaw_rate.setText(
-                f"{data.get('yaw_rate_converted', 0):.2f}"
-            )
+            # TODO cleanup time and update
+            self.ui.lbl_motion_update.setText(f"{data.get('update_rate', 0):.0f}")
+            self.ui.lbl_motion_timestamp.setText(datetime.now().strftime("%H:%M:%S"))
+            self.ui.lbl_motion_pitch.setText(f"{data.get('pitch_converted', 0):.2f}")
+            self.ui.lbl_motion_pitch_rate.setText(f"{data.get('pitch_rate_converted', 0):.2f}")
+            self.ui.lbl_motion_roll.setText(f"{data.get('roll_converted', 0):.2f}")
+            self.ui.lbl_motion_roll_rate.setText(f"{data.get('roll_rate_converted', 0):.2f}")
+            self.ui.lbl_motion_yaw.setText(f"{data.get('yaw_converted', 0):.2f}")
+            self.ui.lbl_motion_yaw_rate.setText(f"{data.get('yaw_rate_converted', 0):.2f}")
 
     # ---------------- scaling factors ----------------
     # TODO check _float_from_text

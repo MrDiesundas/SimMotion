@@ -28,6 +28,11 @@ class MotionPlatform(QObject):
         self.prev_roll = 0.0
         self.prev_yaw = 0.0
 
+        # smoothin filter
+        self.pitch_rate_smooth = 0.0
+        self.roll_rate_smooth = 0.0
+        self.yaw_rate_smooth = 0.0
+
         print("MotionPlatform received stop_stream_callback =", stop_stream_callback)
 
     # ---------- helpers ----------
@@ -239,9 +244,25 @@ class MotionPlatform(QObject):
         # rates
         # negative sign: convert sim convention to platform convention
         # TODO: Fix in new Teensy FW !!!!
-        pitch_rate = -(pitch - self.prev_pitch) / dt
-        roll_rate = -(roll - self.prev_roll) / dt
-        yaw_rate = -(yaw - self.prev_yaw) / dt
+        # pitch_rate = -(pitch - self.prev_pitch) / dt
+        # roll_rate = -(roll - self.prev_roll) / dt
+        # yaw_rate = -(yaw - self.prev_yaw) / dt
+
+        # Apply filter
+        alpha = 0.2  # smoothing factor (tune 0.1–0.3)
+        pitch_rate_raw = -(pitch - self.prev_pitch) / dt
+        roll_rate_raw = -(roll - self.prev_roll) / dt
+        yaw_rate_raw = -(yaw - self.prev_yaw) / dt
+
+        self.pitch_rate_smooth = (alpha * pitch_rate_raw + (1 - alpha) * self.pitch_rate_smooth)
+        self.roll_rate_smooth = (alpha * roll_rate_raw + (1 - alpha) * self.roll_rate_smooth)
+        self.yaw_rate_smooth = (alpha * yaw_rate_raw + (1 - alpha) * self.yaw_rate_smooth)
+        pitch_rate = self.pitch_rate_smooth
+        roll_rate = self.roll_rate_smooth
+        yaw_rate = self.yaw_rate_smooth
+
+        # calc update rate
+        update_rate = 1 / dt
 
         # save for next iteration
         self.prev_time = now
@@ -271,6 +292,7 @@ class MotionPlatform(QObject):
                         "roll_rate_converted": 0.0,
                         "yaw_converted": 0.0,
                         "yaw_rate_converted": 0.0,
+                        "update_rate": update_rate,
                     }
                 # --------------------------------
 
@@ -308,6 +330,7 @@ class MotionPlatform(QObject):
             "roll_rate_converted": roll_rate_conv,
             "yaw_converted": yaw_conv,
             "yaw_rate_converted": yaw_rate_conv,
+            "update_rate": update_rate
         }
 
 
