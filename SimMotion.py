@@ -15,6 +15,10 @@ V3.0.1 - 10.01.2025:
     - test scripts for all modules src/test_....py
     - COMPILE.bat -> to compile SimMotion
     - DEVELOPMENT Flag to compile ui during development
+v3.0.2 - 12.01.2025:
+    - minor adaptation in motion_start_homing, using now stream_to_platform flag
+    - fix update_sliders_from_response float issue
+    - motion_power_toggle -> reset homing_done flag
 """
 
 import sys
@@ -39,10 +43,10 @@ from src.maxflightstick import FlightStick
 from src.key_helper import KeyHelper, VK_CONTROL, VK_INSERT
 
 
-VERSION = "3.0.1 - 10.01.2026"
+VERSION = "3.0.2 - 12.01.2026"
 BAUD_RATE = 115200
 CONFIG_FILE = "config.ini"
-DEVELOPMENT = False
+DEVELOPMENT = True
 # ------------------- START UI COMPILATION --------------------
 import subprocess
 from pathlib import Path
@@ -109,6 +113,7 @@ class MyWindow(QMainWindow):
         self.homing_done = False
         self.telemetry_thread = None
         self.motion_platform = None
+        self.stream_to_platform = False
 
         # latest telemetry snapshots for GUI
         self.latest_incoming = None
@@ -514,28 +519,27 @@ class MyWindow(QMainWindow):
 
     def motion_start_homing(self):
         if self.ui.btn_axes.isChecked():
-            self.update_status("start motion platform homing")
+            self.update_status("start motion platform homing", "yellow")
             previous_btn_state = self.ui.btn_motion.isChecked()
             self.ui.btn_motion.setChecked(False)
-            self.ui.btn_home.setStyleSheet("background-color: green; color: white;")
-            QApplication.processEvents()
             try:
                 ok = self.motion_platform.home()
             except Exception as e:
                 ok = False
+                self.homing_done = False
                 self.update_status(f"homing error {e}" , "red")
             if ok and self.wit_sensor:
                 self.wit_sensor.capture_offsets(real_yaw=float(self.ui.lbl_sim_yaw.text()))
                 self.wit_sensor.reset_translation()
                 self.homing_done = True
                 # QTimer.singleShot(500, self._after_homing_settle)
-            self.update_status("motion platform homed")
-            self.ui.btn_home.setStyleSheet("")
+                self.update_status("motion platform homed")
             self.ui.btn_motion.setChecked(previous_btn_state)
+            self.update_sliders_from_response()
         else:
             self.update_status("motion platform not powered", "red")
+        self.ui.btn_home.setChecked(self.homing_done)
 
-        self.update_sliders_from_response()
 
 
     def send_slider_command(self, axis: str):
@@ -569,7 +573,10 @@ class MyWindow(QMainWindow):
             for part in parts:
                 if "=" in part:
                     key, val = part.split("=", 1)
-                    values[key.strip()] = float(val.strip())
+                    try:
+                        values[key.strip()] = float(val.strip())
+                    except:
+                        values[key.strip()] = val.strip()
             self.ui.sld_pitch.setValue(int(values.get("pitch", 0)))
             self.ui.sld_roll.setValue(int(values.get("roll", 0)))
             self.ui.sld_yaw.setValue(int(values.get("yaw", 0)))
@@ -619,7 +626,34 @@ class MyWindow(QMainWindow):
     #
     #     self.ui.btn_motion.setChecked(True)
 
+
+
     def motion_stream_toggle(self, checked=None):
+        if not hasattr(self, "motion_platform") or self.motion_platform is None:
+            self.update_status("Motion thread not running", "red")
+            return
+
+        # if checked is None:
+        #     # FlightStick pressed → toggle manually
+        #     new_state = not self.ui.btn_motion.isChecked()
+        #     self.ui.btn_motion.setChecked(new_state)
+        #     checked = new_state
+        # print(f'DEBUG {checked}')
+
+        if not self.stream_to_platform:
+            self.ui.btn_motion.setChecked(True)
+            self.motion_power_toggle(True)
+            self.motion_start_homing()
+            self.motion_platform.set_enabled(True)
+            self.stream_to_platform = True
+        else:
+            self.ui.btn_motion.setChecked(False)
+            self.motion_power_toggle(False)
+            self.motion_platform.set_enabled(False)
+            self.stream_to_platform = False
+        QApplication.processEvents()
+
+    def motion_stream_toggle_OLD(self, checked=None):
         if not hasattr(self, "motion_platform") or self.motion_platform is None:
             self.update_status("Motion thread not running", "red")
             return
@@ -629,16 +663,20 @@ class MyWindow(QMainWindow):
             new_state = not self.ui.btn_motion.isChecked()
             self.ui.btn_motion.setChecked(new_state)
             checked = new_state
+        print(f'DEBUG {checked}')
 
         if checked:
+            self.ui.btn_motion.setChecked(True)
             self.motion_power_toggle(True)
             self.motion_start_homing()
             self.motion_platform.set_enabled(True)
             # print("Teensy output ENABLED")
         else:
+            self.ui.btn_motion.setChecked(False)
             self.motion_power_toggle(False)
             self.motion_platform.set_enabled(False)
             # print("Teensy output DISABLED")
+        QApplication.processEvents()
 
     def motion_force_stop(self):
         print('force stop')
@@ -653,6 +691,9 @@ class MyWindow(QMainWindow):
             self.ui.btn_axes.setChecked(checked)
             self.motion_platform.send_receive("M;1" if checked else "M;0")
             self.ui.btn_axes.setText("ON" if checked else "OFF")
+            if not checked:
+                self.homing_done = False
+                self.ui.btn_home.setChecked(self.homing_done)
         else:
             self.ui.btn_axes.setChecked(False)
             self.update_status("Connect first", color="yellow")

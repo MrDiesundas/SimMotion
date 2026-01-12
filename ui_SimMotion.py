@@ -218,6 +218,7 @@ class Ui_SimMotion(object):
         self.btn_home.setObjectName(u"btn_home")
         self.btn_home.setGeometry(QRect(310, 150, 121, 51))
         self.btn_home.setFont(font)
+        self.btn_home.setCheckable(True)
         self.btn_axes = QPushButton(self.grp_axes)
         self.btn_axes.setObjectName(u"btn_axes")
         self.btn_axes.setGeometry(QRect(310, 90, 121, 51))

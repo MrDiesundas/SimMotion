@@ -772,6 +772,9 @@
       <property name="text">
        <string>HOME</string>
       </property>
+      <property name="checkable">
+       <bool>true</bool>
+      </property>
      </widget>
      <widget class="QPushButton" name="btn_axes">
       <property name="geometry">
