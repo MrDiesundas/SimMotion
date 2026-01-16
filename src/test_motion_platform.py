@@ -59,11 +59,11 @@ class MotionTestGUI(QWidget):
         self.rate_slider.setMaximum(200)
         self.rate_slider.setValue(25)
 
-        self.amp_label = QLabel("Amplitude: 5°")
+        self.amp_label = QLabel("Amplitude: 8°")
         self.amp_slider = QSlider(Qt.Horizontal)
         self.amp_slider.setMinimum(1)
         self.amp_slider.setMaximum(30)
-        self.amp_slider.setValue(5)
+        self.amp_slider.setValue(8)
 
         self.freq_label = QLabel("Frequency: 0.20 Hz")
         self.freq_slider = QSlider(Qt.Horizontal)

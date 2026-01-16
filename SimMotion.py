@@ -23,6 +23,8 @@ v3.0.3 - 12.01.2025:
     - adapt MSFSListener class with a interpolator (had doupt in frame rate)
     - adapt MotionPlatform class with filter for sending telemetry
     - fix in SimMotion save cmb_sim_software (was absent)
+v3.0.4 - 16.01.2025:
+    - MotionPlatform class with kalman filter
 """
 
 import sys
@@ -47,10 +49,10 @@ from src.maxflightstick import FlightStick
 from src.key_helper import KeyHelper, VK_CONTROL, VK_INSERT
 
 
-VERSION = "3.0.3 - 12.01.2026"
+VERSION = "v3.0.4 - 16.01.2025"
 BAUD_RATE = 115200
 CONFIG_FILE = "config.ini"
-DEVELOPMENT = True
+DEVELOPMENT = False
 # ------------------- START UI COMPILATION --------------------
 import subprocess
 from pathlib import Path

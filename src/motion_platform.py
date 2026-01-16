@@ -28,10 +28,31 @@ class MotionPlatform(QObject):
         self.prev_roll = 0.0
         self.prev_yaw = 0.0
 
-        # smoothin filter
+        # FILTER
+        self.filter == 'kal_filter' # exp_filter or kal_filter
+
+        # exponential smoothing filter (simple solution)
         self.pitch_rate_smooth = 0.0
         self.roll_rate_smooth = 0.0
         self.yaw_rate_smooth = 0.0
+
+        # Kalman filter state for each axis (complex solution, better performance)
+        self.kf_pitch_rate = 0.0
+        self.kf_roll_rate = 0.0
+        self.kf_yaw_rate = 0.0
+
+        # Kalman filter covariance
+        self.kf_pitch_P = 1.0
+        self.kf_roll_P = 1.0
+        self.kf_yaw_P = 1.0
+
+        # Tunable noise parameters
+        self.kf_Q = 0.5  # process noise (how fast rate can change)
+        self.kf_R = 5  # measurement noise (how noisy raw rate is)
+        # tuning:
+        # Q = 0.1, R = 10 → very smooth (laggy)
+        # Q = 1.0, R = 3 → more responsive (hard, rumbling)
+        # Q = 0.5, R = 5 → good general‑purpose   setting
 
         print("MotionPlatform received stop_stream_callback =", stop_stream_callback)
 
@@ -225,6 +246,26 @@ class MotionPlatform(QObject):
     # ---------------------------------------------------------
     # Process telemetry (scaling, rates, deminute)
     # ---------------------------------------------------------
+    def _kalman_update(self, x, P, measurement, Q, R):
+        """
+        Simple 1D Kalman filter update.
+        x = previous estimate
+        P = previous covariance
+        measurement = new noisy measurement
+        Q = process noise
+        R = measurement noise
+        """
+        # Prediction step
+        x_pred = x
+        P_pred = P + Q
+
+        # Update step
+        K = P_pred / (P_pred + R)
+        x_new = x_pred + K * (measurement - x_pred)
+        P_new = (1 - K) * P_pred
+
+        return x_new, P_new
+
     def _process_telemetry(self, t: dict):
         now = time.time()
 
@@ -248,18 +289,54 @@ class MotionPlatform(QObject):
         # roll_rate = -(roll - self.prev_roll) / dt
         # yaw_rate = -(yaw - self.prev_yaw) / dt
 
-        # Apply filter
-        alpha = 0.2  # smoothing factor (tune 0.1–0.3)
-        pitch_rate_raw = -(pitch - self.prev_pitch) / dt
-        roll_rate_raw = -(roll - self.prev_roll) / dt
-        yaw_rate_raw = -(yaw - self.prev_yaw) / dt
+        # Apply exponential filter
+        if self.filter == 'exp_filter':
+            alpha = 0.4  # smoothing factor (tune 0.1–0.3 -> the higher, the smoother)
+            pitch_rate_raw = -(pitch - self.prev_pitch) / dt
+            roll_rate_raw = -(roll - self.prev_roll) / dt
+            yaw_rate_raw = -(yaw - self.prev_yaw) / dt
 
-        self.pitch_rate_smooth = (alpha * pitch_rate_raw + (1 - alpha) * self.pitch_rate_smooth)
-        self.roll_rate_smooth = (alpha * roll_rate_raw + (1 - alpha) * self.roll_rate_smooth)
-        self.yaw_rate_smooth = (alpha * yaw_rate_raw + (1 - alpha) * self.yaw_rate_smooth)
-        pitch_rate = self.pitch_rate_smooth
-        roll_rate = self.roll_rate_smooth
-        yaw_rate = self.yaw_rate_smooth
+            self.pitch_rate_smooth = (alpha * pitch_rate_raw + (1 - alpha) * self.pitch_rate_smooth)
+            self.roll_rate_smooth = (alpha * roll_rate_raw + (1 - alpha) * self.roll_rate_smooth)
+            self.yaw_rate_smooth = (alpha * yaw_rate_raw + (1 - alpha) * self.yaw_rate_smooth)
+            pitch_rate = self.pitch_rate_smooth
+            roll_rate = self.roll_rate_smooth
+            yaw_rate = self.yaw_rate_smooth
+        elif self.filter == 'kal_filter':
+            pitch_rate_raw = -(pitch - self.prev_pitch) / dt
+            roll_rate_raw = -(roll - self.prev_roll) / dt
+            yaw_rate_raw = -(yaw - self.prev_yaw) / dt
+
+            # Kalman filter update for pitch rate
+            self.kf_pitch_rate, self.kf_pitch_P = self._kalman_update(
+                self.kf_pitch_rate,
+                self.kf_pitch_P,
+                pitch_rate_raw,
+                self.kf_Q,
+                self.kf_R
+            )
+
+            # Kalman filter update for roll rate
+            self.kf_roll_rate, self.kf_roll_P = self._kalman_update(
+                self.kf_roll_rate,
+                self.kf_roll_P,
+                roll_rate_raw,
+                self.kf_Q,
+                self.kf_R
+            )
+
+            # Kalman filter update for yaw rate
+            self.kf_yaw_rate, self.kf_yaw_P = self._kalman_update(
+                self.kf_yaw_rate,
+                self.kf_yaw_P,
+                yaw_rate_raw,
+                self.kf_Q,
+                self.kf_R
+            )
+
+            pitch_rate = self.kf_pitch_rate
+            roll_rate = self.kf_roll_rate
+            yaw_rate = self.kf_yaw_rate
 
         # calc update rate
         update_rate = 1 / dt
