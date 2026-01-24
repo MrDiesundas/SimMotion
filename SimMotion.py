@@ -25,7 +25,16 @@ v3.0.3 - 12.01.2025:
     - fix in SimMotion save cmb_sim_software (was absent)
 v3.0.4 - 16.01.2025:
     - MotionPlatform class with kalman filter
+v3.0.5 - 24.01.2025:
+    - MotionPlatform class adapt send_receive -> waiting until nothing comes anymore
+    - adapt test_motion_platform accordingly
+    - note: reduced stepper microstep from 40000 to 4000 -> use teensy_flight_simulator_v91.ino or higher
 """
+
+# TODO: update_sliders_from_response and sliders_update_from_response
+# TODO: eliminate yaw
+# TODO: cleanup avoid double function
+
 
 import sys
 import os
@@ -190,8 +199,9 @@ class MyWindow(QMainWindow):
         if not self.motion_platform:
             return
         resp = self.motion_platform.send_receive("E;", wait=True)
+        print(resp)
         if not resp or not resp.startswith("E;"):
-            self.update_status("Invalid response format.", "red")
+            self.update_status(f"Invalid response format: {resp}", "red")
             return
         try:
             parts = resp[2:].split(";")
@@ -572,7 +582,7 @@ class MyWindow(QMainWindow):
             return
         resp = self.motion_platform.request_status()
         if not resp or not resp.startswith("E;"):
-            self.update_status("Invalid response format.", "red")
+            self.update_status(f"Invalid response format: {resp}", "red")
             return
         try:
             parts = resp[2:].split(";")

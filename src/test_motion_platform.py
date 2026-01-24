@@ -29,6 +29,7 @@ from PySide6.QtWidgets import QCheckBox
 
 from motion_platform import MotionPlatform   # your class
 
+# TODO: find jump in homing routine
 
 class MotionTestGUI(QWidget):
     def __init__(self):
@@ -136,19 +137,6 @@ class MotionTestGUI(QWidget):
             "yaw_dem": (0, 100, 200, 100),
         }
 
-    def fake_factors_OLD(self):
-        return {
-            "pitch_enabled": True,
-            "roll_enabled": True,
-            "yaw_enabled": True,
-            "pitch_factor": 1.0,
-            "roll_factor": 1.0,
-            "yaw_factor": 1.0,
-            "pitch_dem": (0, 100, 200, 100),
-            "roll_dem": (0, 100, 200, 100),
-            "yaw_dem": (0, 100, 200, 100),
-        }
-
     def update_amp_label(self, value):
         self.amp_label.setText(f"Amplitude: {value}°")
 
@@ -184,6 +172,7 @@ class MotionTestGUI(QWidget):
             try:
                 self.platform.connect()
                 self.connected = True
+                self.platform.streaming_enabled = False
                 self.connect_btn.setText("Disconnect")
                 self.connect_btn.setStyleSheet("background-color: green; color: white;")
                 print(f"Connected on {port}")
@@ -205,10 +194,18 @@ class MotionTestGUI(QWidget):
         if not self.motion_enabled:
             # turn ON
             print("Sending M;1")
+
+            # *** FIX: stop streaming BEFORE sending M;1 ***
+            self.platform.streaming_enabled = False
+            time.sleep(0.05)  # allow thread to stop
             self.platform.send_receive("M;1", wait=True)
+
+            print("wait for homing...", end="")
+            self.platform.streaming_enabled = False
+            time.sleep(0.05)
             self.platform.home()
+
             self.motion_enabled = True
-            self.platform.streaming_enabled = True
             self.enable_btn.setText("Disable Motion (M;0)")
             self.enable_btn.setStyleSheet("background-color: green; color: white;")
 
@@ -217,7 +214,7 @@ class MotionTestGUI(QWidget):
             print("Sending M;0")
             self.platform.send_receive("M;0", wait=True)
             self.motion_enabled = False
-            self.platform.streaming_enabled = False
+            # self.platform.streaming_enabled = False
             self.enable_btn.setText("Enable Motion (M;1)")
             self.enable_btn.setStyleSheet("")
 
@@ -227,6 +224,8 @@ class MotionTestGUI(QWidget):
     # ---------------------------------------------------------
     def toggle_stream(self):
         if not self.running:
+            # self.motion_enabled = True
+            self.platform.streaming_enabled = True
             self.running = True
             self.thread = threading.Thread(target=self.sine_loop, daemon=True)
             self.thread.start()
@@ -235,11 +234,16 @@ class MotionTestGUI(QWidget):
             self.start_btn.setStyleSheet("background-color: green; color: white;")
             print("Streaming started.")
         else:
+            # self.motion_enabled = False
+            self.platform.streaming_enabled = False
             self.running = False
             self.platform.set_enabled(False)
             self.start_btn.setText("Start streaming")
             self.start_btn.setStyleSheet("")
             print("Streaming stopped.")
+            print("Sending E;")
+            resp = self.platform.send_receive("E;0", wait=True)
+            print(resp)
 
 
     # ---------------------------------------------------------

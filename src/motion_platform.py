@@ -5,6 +5,7 @@ import threading
 
 # todo check, where stop_stream_callback makes sense
 # todo pack telemetry in a class to prepare json
+# todo check send_and recieve if still works with simulator
 
 
 class MotionPlatform(QObject):
@@ -29,7 +30,7 @@ class MotionPlatform(QObject):
         self.prev_yaw = 0.0
 
         # FILTER
-        self.filter == 'kal_filter' # exp_filter or kal_filter
+        self.filter = 'kal_filter' # exp_filter or kal_filter
 
         # exponential smoothing filter (simple solution)
         self.pitch_rate_smooth = 0.0
@@ -47,8 +48,8 @@ class MotionPlatform(QObject):
         self.kf_yaw_P = 1.0
 
         # Tunable noise parameters
-        self.kf_Q = 0.5  # process noise (how fast rate can change)
-        self.kf_R = 5  # measurement noise (how noisy raw rate is)
+        self.kf_Q = 0.75  # process noise (how fast rate can change)
+        self.kf_R = 4  # measurement noise (how noisy raw rate is)
         # tuning:
         # Q = 0.1, R = 10 → very smooth (laggy)
         # Q = 1.0, R = 3 → more responsive (hard, rumbling)
@@ -136,6 +137,53 @@ class MotionPlatform(QObject):
 
         previous_streaming_status = self.streaming_enabled
         with self.serial_lock:
+            self.streaming_enabled = False
+            try:
+                self.serial.reset_input_buffer()
+
+                if not message.endswith("\n"):
+                    message += "\n"
+                self.serial.write(message.encode("ascii", errors="ignore"))
+
+                if wait:
+                    lines = []
+
+                    while True:
+                        # If no bytes available, wait briefly to catch last fragments
+                        if self.serial.in_waiting == 0:
+                            time.sleep(0.01)
+                            if self.serial.in_waiting == 0:
+                                break
+
+                        raw = self.serial.readline()
+                        if not raw:
+                            break
+
+                        line = raw.decode(errors="ignore").strip()
+                        if line:
+                            lines.append(line)
+
+                    reply = "\n".join(lines) if lines else None
+                else:
+                    reply = None
+
+            except Exception as e:
+                self.serial.reset_output_buffer()
+                self._status(f"Serial error: {e}", "red")
+                reply = None
+
+            finally:
+                self.streaming_enabled = previous_streaming_status
+
+        return reply
+
+    def send_receive_OLD(self, message: str, wait=False):
+        if not self.serial or not self.serial.is_open:
+            self._status("Serial port not open", "red")
+            return None
+
+        previous_streaming_status = self.streaming_enabled
+        with self.serial_lock:
             # pause streaming
             self.streaming_enabled = False
             try:
@@ -152,36 +200,13 @@ class MotionPlatform(QObject):
                     lines = []
                     while True:
                         raw = self.serial.readline()
+                        print(raw)
                         if not raw:
                             break
                         lines.append(raw.decode(errors="ignore").strip())
-
                     reply = "\n".join(lines) if lines else None
                 else:
-                    # raw = self.serial.read_all()
                     reply = None
-
-                # prepare response
-                # if wait:
-                #     if not lines:
-                #         # timeout
-                #         self._status("Motion Platform Timeout", "red")
-                #         reply = None
-                #     else:
-                #         # reply = raw.decode(errors="ignore").strip()
-                #         reply = lines
-                # else:
-                #     reply = None
-
-                # if wait:
-                #     raw = self.serial.readline()
-                #     if not raw:
-                #
-                #         reply = None
-                #     else:
-                #         reply = raw.decode(errors="ignore").strip()
-                # else:
-                #     reply = None
 
             except Exception as e:
                 self.serial.reset_output_buffer()
@@ -203,15 +228,6 @@ class MotionPlatform(QObject):
         self.serial.timeout = 5
 
         try:
-            # TODO implement teensy response
-            # resp = self.send_receive("Z;180", wait=True)
-            # if not resp or not resp.startswith("OK"):
-            #     self._status("Homing failed: Z command", "red")
-            #     return False
-
-            # self.send_receive("Z;180", wait=True)
-            # self.send_receive("P;0", wait=True)
-            # self.send_receive("R;0", wait=True)
             self.send_receive("H", wait=True)
 
             # reset rates
