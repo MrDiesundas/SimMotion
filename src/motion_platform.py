@@ -130,94 +130,59 @@ class MotionPlatform(QObject):
     # ---------------------------------------------------------
     # Command/response interface
     # ---------------------------------------------------------
-    def send_receive(self, message: str, wait=False):
+    def send_receive(self, message: str, wait=False, resp=None):
         if not self.serial or not self.serial.is_open:
             self._status("Serial port not open", "red")
             return None
 
         previous_streaming_status = self.streaming_enabled
+
         with self.serial_lock:
             self.streaming_enabled = False
             try:
+                # Clear old data
                 self.serial.reset_input_buffer()
 
+                # Ensure newline
                 if not message.endswith("\n"):
                     message += "\n"
                 self.serial.write(message.encode("ascii", errors="ignore"))
 
-                if wait:
-                    lines = []
+                if not wait:
+                    return None
 
-                    while True:
-                        # If no bytes available, wait briefly to catch last fragments
-                        if self.serial.in_waiting == 0:
-                            time.sleep(0.01)
-                            if self.serial.in_waiting == 0:
-                                break
+                lines = []
+                deadline = time.time() + self.serial.timeout
 
-                        raw = self.serial.readline()
-                        if not raw:
-                            break
+                while time.time() < deadline:
+                    raw = self.serial.readline()
 
+                    if raw:
                         line = raw.decode(errors="ignore").strip()
                         if line:
                             lines.append(line)
 
-                    reply = "\n".join(lines) if lines else None
-                else:
-                    reply = None
+                            # If a specific terminator is expected, stop when found
+                            if resp and resp in line:
+                                break
 
-            except Exception as e:
-                self.serial.reset_output_buffer()
-                self._status(f"Serial error: {e}", "red")
-                reply = None
+                    else:
+                        # No data this cycle; small pause before retry
+                        time.sleep(0.01)
 
-            finally:
-                self.streaming_enabled = previous_streaming_status
-
-        return reply
-
-    def send_receive_OLD(self, message: str, wait=False):
-        if not self.serial or not self.serial.is_open:
-            self._status("Serial port not open", "red")
-            return None
-
-        previous_streaming_status = self.streaming_enabled
-        with self.serial_lock:
-            # pause streaming
-            self.streaming_enabled = False
-            try:
-                # flush stale bytes
-                self.serial.reset_input_buffer()
-
-                # send command
-                if not message.endswith("\n"):
-                    message += "\n"
-                self.serial.write(message.encode("ascii", errors="ignore"))
-
-                # do serial stuff
-                if wait:
-                    lines = []
-                    while True:
-                        raw = self.serial.readline()
-                        print(raw)
-                        if not raw:
+                        # If no expected terminator, stop when silence persists
+                        if resp is None and self.serial.in_waiting == 0:
                             break
-                        lines.append(raw.decode(errors="ignore").strip())
-                    reply = "\n".join(lines) if lines else None
-                else:
-                    reply = None
+
+                return "\n".join(lines) if lines else None
 
             except Exception as e:
                 self.serial.reset_output_buffer()
                 self._status(f"Serial error: {e}", "red")
-                reply = None
+                return None
 
             finally:
-                # resume streaming
                 self.streaming_enabled = previous_streaming_status
-
-        return reply
 
     def home(self):
         if not self.serial.is_open:
@@ -228,8 +193,8 @@ class MotionPlatform(QObject):
         self.serial.timeout = 5
 
         try:
-            self.send_receive("H", wait=True)
-
+            resp = self.send_receive("H;", wait=True, resp="H;DONE")
+            print(f'debug homing: {resp}')
             # reset rates
             self.prev_time = None
             self.prev_pitch = 0

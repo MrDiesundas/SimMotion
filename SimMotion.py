@@ -29,6 +29,8 @@ v3.0.5 - 24.01.2025:
     - MotionPlatform class adapt send_receive -> waiting until nothing comes anymore
     - adapt test_motion_platform accordingly
     - note: reduced stepper microstep from 40000 to 4000 -> use teensy_flight_simulator_v91.ino or higher
+v3.0.6 - 25.01.2025:
+    - adapt send_receive(self, message: str, wait=False, resp=None) with expected response to fix homing
 """
 
 # TODO: update_sliders_from_response and sliders_update_from_response
@@ -58,7 +60,7 @@ from src.maxflightstick import FlightStick
 from src.key_helper import KeyHelper, VK_CONTROL, VK_INSERT
 
 
-VERSION = "v3.0.4 - 16.01.2025"
+VERSION = "v3.0.6 - 25.01.2025"
 BAUD_RATE = 115200
 CONFIG_FILE = "config.ini"
 DEVELOPMENT = False
@@ -149,21 +151,6 @@ class MyWindow(QMainWindow):
         self.load_factors()
 
     # ---------------- UI setup ----------------
-
-    # def _load_ui(self):
-    #     # loader = QUiLoader()
-    #     # ui_file = QFile(path)
-    #     # ui_file.open(QFile.ReadOnly)
-    #     # self.ui = loader.load(ui_file, self)
-    #     # ui_file.close()
-    #     #
-    #     # self.ui: Ui_SimMotion = Ui_SimMotion()  # use this to get rid off pycharm warnings
-    #
-    #     # self.ui.setupUi(self)  # load UI into this window
-    #
-    #     # self.setCentralWidget(self.ui)
-    #     self.move(1280, 70)
-
     def _connect_signals(self):
         self.ui.btn_connect.clicked.connect(self.connection_toggle)
         self.ui.btn_motion.clicked.connect(self.motion_stream_toggle)
@@ -194,33 +181,7 @@ class MyWindow(QMainWindow):
     def slider_update(self, slider, label):
         slider.valueChanged.connect(lambda v: label.setText(str(v)))
 
-
-    def slider_update_from_response(self):
-        if not self.motion_platform:
-            return
-        resp = self.motion_platform.send_receive("E;", wait=True)
-        print(resp)
-        if not resp or not resp.startswith("E;"):
-            self.update_status(f"Invalid response format: {resp}", "red")
-            return
-        try:
-            parts = resp[2:].split(";")
-            values = {}
-            for part in parts:
-                if "=" in part:
-                    key, val = part.split("=", 1)
-                    values[key.strip()] = float(val.strip())
-            self.ui.sld_pitch.setValue(int(values.get("pitch", 0)))
-            self.ui.sld_roll.setValue(int(values.get("roll", 0)))
-            self.ui.sld_yaw.setValue(int(values.get("yaw", 0)))
-
-            motion_power = int(values.get("motionPowerToggle", 0))
-            self.ui.btn_axes.setChecked(motion_power == 1)
-        except Exception as e:
-            self.update_status(f"ERROR slider_update_from_response: {e}", "red")
-
     # ---------------- config ----------------
-
     def load_factors(self):
         config = configparser.ConfigParser()
         if os.path.exists(CONFIG_FILE):
@@ -525,7 +486,6 @@ class MyWindow(QMainWindow):
         self.update_status("Bye Bye")
 
     # ---------------- status & motion toggle ----------------
-
     def update_status(self, txt: str = "", color: str = ""):
         self.ui.lbl_status.setStyleSheet("" if color == "" else f"color: {color};")
         self.ui.lbl_status.setText(str(txt))
@@ -533,7 +493,6 @@ class MyWindow(QMainWindow):
         print(txt)
 
     # ---------------- MOTION PLATFORM ----------------
-
     def motion_start_homing(self):
         if self.ui.btn_axes.isChecked():
             self.update_status("start motion platform homing", "yellow")
@@ -557,13 +516,11 @@ class MyWindow(QMainWindow):
             self.update_status("motion platform not powered", "red")
         self.ui.btn_home.setChecked(self.homing_done)
 
-
-
     def send_slider_command(self, axis: str):
         if self.motion_platform is None or not self.motion_platform.serial.is_open:
             self.update_status("Serial port is not open.", "red")
             return
-
+        self.ui.btn_home.setChecked(False)
         if axis == "P":
             val = self.ui.sld_pitch.value() * float(self.ui.txt_pitch_factor.text())
         elif axis == "R":
@@ -573,9 +530,7 @@ class MyWindow(QMainWindow):
         else:
             self.update_status("Invalid axis in send_slider_command", "red")
             return
-
         self.motion_platform.send_axis_value(axis, val)
-
 
     def update_sliders_from_response(self):
         if not self.motion_platform:
@@ -603,59 +558,10 @@ class MyWindow(QMainWindow):
         except Exception as e:
             self.update_status(f"ERROR update_sliders_from_response: {e}", "red")
 
-
-    # def _after_homing_settle(self):
-    #     self.slider_update_from_response()
-    #
-    # def motion_start_homing_OLD(self):
-    #     self.ui.btn_motion.setChecked(False)
-    #
-    #     if self.ui.btn_axes.isChecked():
-    #         ok = self.motion_platform.home()
-    #
-    #         if ok and self.wit_sensor:
-    #             # 1) Capture IMU offsets (zero orientation)
-    #             self.wit_sensor.capture_offsets(real_yaw = float(self.ui.lbl_sim_yaw.text()))
-    #
-    #             # 2) Reset integrated translation
-    #             self.wit_sensor.reset_translation()
-    #
-    #             # 3) Mark homing as done
-    #             self.homing_done = True
-    #
-    #             # 4) Give the rig a moment to settle
-    #             time.sleep(0.5)
-    #
-    #             # TODO Activate
-    #             # # 5) If VR is active and MMF is valid → calibrate MC
-    #             # if self.vr_active and self.wit_sensor.mmf_valid:
-    #             #     # self.trigger_mc_calibration()
-    #             #     # CTRL + DEL
-    #             #     KeyHelper.tap_combo(VK_CONTROL, VK_DELETE)
-    #             #     self.update_status("Motion Compensation calibrated", "green")
-    #             # else:
-    #             #     self.update_status("Homing done (MC not calibrated: VR inactive or MMF closed)", "yellow")
-    #
-    #         self.slider_update_from_response()
-    #
-    #     else:
-    #         self.update_status("motion platform not powered", "red")
-    #
-    #     self.ui.btn_motion.setChecked(True)
-
-
-
     def motion_stream_toggle(self, checked=None):
         if not hasattr(self, "motion_platform") or self.motion_platform is None:
             self.update_status("Motion thread not running", "red")
             return
-
-        # if checked is None:
-        #     # FlightStick pressed → toggle manually
-        #     new_state = not self.ui.btn_motion.isChecked()
-        #     self.ui.btn_motion.setChecked(new_state)
-        #     checked = new_state
-        # print(f'DEBUG {checked}')
 
         if not self.stream_to_platform:
             self.ui.btn_motion.setChecked(True)
@@ -668,31 +574,6 @@ class MyWindow(QMainWindow):
             self.motion_power_toggle(False)
             self.motion_platform.set_enabled(False)
             self.stream_to_platform = False
-        QApplication.processEvents()
-
-    def motion_stream_toggle_OLD(self, checked=None):
-        if not hasattr(self, "motion_platform") or self.motion_platform is None:
-            self.update_status("Motion thread not running", "red")
-            return
-
-        if checked is None:
-            # FlightStick pressed → toggle manually
-            new_state = not self.ui.btn_motion.isChecked()
-            self.ui.btn_motion.setChecked(new_state)
-            checked = new_state
-        print(f'DEBUG {checked}')
-
-        if checked:
-            self.ui.btn_motion.setChecked(True)
-            self.motion_power_toggle(True)
-            self.motion_start_homing()
-            self.motion_platform.set_enabled(True)
-            # print("Teensy output ENABLED")
-        else:
-            self.ui.btn_motion.setChecked(False)
-            self.motion_power_toggle(False)
-            self.motion_platform.set_enabled(False)
-            # print("Teensy output DISABLED")
         QApplication.processEvents()
 
     def motion_force_stop(self):
@@ -765,7 +646,6 @@ class MyWindow(QMainWindow):
             self.update_status(f"ERROR VR_motion_compensation_trigger: {e}", "red")
 
     # ---------------- GUI updates ----------------
-
     def gui_update_incoming(self, data: dict):
         self.latest_incoming = data
 
@@ -842,16 +722,7 @@ class MyWindow(QMainWindow):
             ),
         }
 
-    # def _float_from_text(self, widget):
-    #     try:
-    #         txt = widget.text().strip()
-    #         return float(txt) if txt else 0.0
-    #     except ValueError:
-    #         self.update_status(f"Invalid numeric input: {widget.objectName()}", "yellow")
-    #         return 0.0
-
     # ---------------- shutdown ----------------
-
     def quit_app(self):
         try:
             self.update_status("Shutting down...")
@@ -864,15 +735,6 @@ class MyWindow(QMainWindow):
             self.update_status("ini file has been written")
         except Exception as e:
             self.update_status(f"write ini file failed: {e}", "red")
-
-
-        # If you still have save_factors(), you can re-enable this later.
-        # try:
-        #     self.save_factors()
-        #     self.update_status("ini file has been written")
-        # except Exception as e:
-        #     self.update_status(f"write ini file failed: {e}", "red")
-
         QApplication.quit()
 
     def closeEvent(self, event):
