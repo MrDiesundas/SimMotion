@@ -31,6 +31,10 @@ v3.0.5 - 24.01.2025:
     - note: reduced stepper microstep from 40000 to 4000 -> use teensy_flight_simulator_v91.ino or higher
 v3.0.6 - 25.01.2025:
     - adapt send_receive(self, message: str, wait=False, resp=None) with expected response to fix homing
+V4.0.0 - 25.01.2025:
+    - changed to position control -> MUST USE SimMotion4.ino or higher
+    - removed Kalman filter from motion platform -> now in teensy
+    - changed timer to be flight time clock
 """
 
 # TODO: update_sliders_from_response and sliders_update_from_response
@@ -60,7 +64,7 @@ from src.maxflightstick import FlightStick
 from src.key_helper import KeyHelper, VK_CONTROL, VK_INSERT
 
 
-VERSION = "v3.0.6 - 25.01.2025"
+VERSION = "v4.0.0 - 25.01.2025"
 BAUD_RATE = 115200
 CONFIG_FILE = "config.ini"
 DEVELOPMENT = False
@@ -132,6 +136,12 @@ class MyWindow(QMainWindow):
         self.motion_platform = None
         self.stream_to_platform = False
 
+        # Create the timer once
+        self.motion_timer = QTimer(self)
+        self.motion_timer.setInterval(1000) # update every 1 second
+        self.motion_timer.timeout.connect(self.motion_flight_time)
+        self.flight_time = 0
+
         # latest telemetry snapshots for GUI
         self.latest_incoming = None
         self.latest_outgoing = None
@@ -190,8 +200,10 @@ class MyWindow(QMainWindow):
             try:
                 if "Factors" in config:
                     f = config["Factors"]
-                    self.ui.txt_pitch_factor.setText(f.get("txt_pitch_factor", "3.2"))
-                    self.ui.txt_roll_factor.setText(f.get("txt_roll_factor", "3.2"))
+                    self.flight_time = int(f.get("flight_time_seconds", "0"))
+
+                    self.ui.txt_pitch_factor.setText(f.get("txt_pitch_factor", "0.5"))
+                    self.ui.txt_roll_factor.setText(f.get("txt_roll_factor", "0.5"))
                     self.ui.txt_yaw_factor.setText(f.get("txt_yaw_factor", "1.0"))
 
                     self.ui.txt_pitch_dem_low_percent.setText(f.get("txt_pitch_dem_low_percent", "0"))
@@ -249,6 +261,7 @@ class MyWindow(QMainWindow):
             config["Factors"] = {}
         f = config["Factors"]
 
+        f["flight_time_seconds"] = str(self.flight_time)
         f["txt_pitch_factor"] = self.ui.txt_pitch_factor.text()
         f["txt_roll_factor"] = self.ui.txt_roll_factor.text()
         f["txt_yaw_factor"] = self.ui.txt_yaw_factor.text()
@@ -493,6 +506,21 @@ class MyWindow(QMainWindow):
         print(txt)
 
     # ---------------- MOTION PLATFORM ----------------
+    def hms_to_seconds(self, hms: str) -> int:
+        h, m, s = map(int, hms.split(":"))
+        return h * 3600 + m * 60 + s
+
+    def seconds_to_hms(self, total: int) -> str:
+        h = total // 3600
+        m = (total % 3600) // 60
+        s = total % 60
+        return f"{h:02d}:{m:02d}:{s:02d}"
+
+    def motion_flight_time(self):
+        self.flight_time = self.flight_time + 1
+        # mytime = self.seconds_to_hms(self.flight_time)
+        # self.ui.lbl_motion_timestamp.setText(mytime)
+
     def motion_start_homing(self):
         if self.ui.btn_axes.isChecked():
             self.update_status("start motion platform homing", "yellow")
@@ -568,12 +596,18 @@ class MyWindow(QMainWindow):
             self.motion_power_toggle(True)
             self.motion_start_homing()
             self.motion_platform.set_enabled(True)
+            resp = self.motion_platform.send_receive('C;1', wait=True)
             self.stream_to_platform = True
+            self.motion_timer.start()
         else:
+            self.motion_timer.stop()
+            resp = self.motion_platform.send_receive('C;0', wait=True)
             self.ui.btn_motion.setChecked(False)
-            self.motion_power_toggle(False)
+            # self.motion_power_toggle(False)
             self.motion_platform.set_enabled(False)
             self.stream_to_platform = False
+            self.ui.btn_home.setChecked(False)
+        self.update_status(resp)
         QApplication.processEvents()
 
     def motion_force_stop(self):
@@ -677,7 +711,8 @@ class MyWindow(QMainWindow):
             data = self.latest_outgoing
             # TODO cleanup time and update
             self.ui.lbl_motion_update.setText(f"{data.get('update_rate', 0):.0f}")
-            self.ui.lbl_motion_timestamp.setText(datetime.now().strftime("%H:%M:%S"))
+            # self.ui.lbl_motion_timestamp.setText(datetime.now().strftime("%H:%M:%S"))
+            self.ui.lbl_motion_timestamp.setText(self.seconds_to_hms(self.flight_time))
             self.ui.lbl_motion_pitch.setText(f"{data.get('pitch_converted', 0):.2f}")
             self.ui.lbl_motion_pitch_rate.setText(f"{data.get('pitch_rate_converted', 0):.2f}")
             self.ui.lbl_motion_roll.setText(f"{data.get('roll_converted', 0):.2f}")

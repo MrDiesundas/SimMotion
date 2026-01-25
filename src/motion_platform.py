@@ -30,7 +30,7 @@ class MotionPlatform(QObject):
         self.prev_yaw = 0.0
 
         # FILTER
-        self.filter = 'kal_filter' # exp_filter or kal_filter
+        self.filter = None # 'exp_filter', 'kal_filter', None
 
         # exponential smoothing filter (simple solution)
         self.pitch_rate_smooth = 0.0
@@ -48,8 +48,8 @@ class MotionPlatform(QObject):
         self.kf_yaw_P = 1.0
 
         # Tunable noise parameters
-        self.kf_Q = 0.75  # process noise (how fast rate can change)
-        self.kf_R = 4  # measurement noise (how noisy raw rate is)
+        self.kf_Q = 1.5  # process noise (how fast rate can change)
+        self.kf_R = 2  # measurement noise (how noisy raw rate is)
         # tuning:
         # Q = 0.1, R = 10 → very smooth (laggy)
         # Q = 1.0, R = 3 → more responsive (hard, rumbling)
@@ -67,9 +67,10 @@ class MotionPlatform(QObject):
     # ---------------------------------------------------------
     def connect(self):
         self.serial = serial.Serial(self.port, self.baud, timeout=1, write_timeout=1)
+        # resp = self.initial_receive()
         self.serial.reset_input_buffer()
         self.serial.reset_output_buffer()
-        self._status(f"Motion platform connected on {self.port}")
+        self._status(f"Motion platform connected on {self.port}\n")
 
     def disconnect(self):
         if self.serial and self.serial.is_open:
@@ -89,6 +90,7 @@ class MotionPlatform(QObject):
         packet = self._build_packet(corr)
         if self.streaming_enabled:
             self._send_packet(packet)
+            # print(f'debug: {packet}')
 
         # Emit corr back to SimMotion
         self.outgoing_signal.emit(corr)
@@ -97,15 +99,22 @@ class MotionPlatform(QObject):
     # Build Teensy packet
     # ---------------------------------------------------------
     def _build_packet(self, corr):
+        # packet = (
+        #     f"X;"
+        #     f"pitch={corr['pitch_converted']:.2f};"
+        #     f"pitch_rate={corr['pitch_rate_converted']:.2f};"
+        #     f"roll={corr['roll_converted']:.2f};"
+        #     f"roll_rate={corr['roll_rate_converted']:.2f};"
+        #     f"yaw={corr['yaw_converted']:.2f};"
+        #     f"yaw_rate={corr['yaw_rate_converted']:.2f};"
+        #     f"airspeed={corr['airspeed']:.2f}\n"
+        # )
         packet = (
             f"X;"
-            f"pitch={corr['pitch_converted']:.2f};"
-            f"pitch_rate={corr['pitch_rate_converted']:.2f};"
-            f"roll={corr['roll_converted']:.2f};"
-            f"roll_rate={corr['roll_rate_converted']:.2f};"
-            f"yaw={corr['yaw_converted']:.2f};"
-            f"yaw_rate={corr['yaw_rate_converted']:.2f};"
-            f"airspeed={corr['airspeed']:.2f}\n"
+            f"{-corr['pitch_converted']:.2f};"
+            f"{-corr['roll_converted']:.2f};"
+            f"{corr['yaw_converted']:.2f};"
+            f"{corr['airspeed']:.2f}"
         )
         return packet
 
@@ -124,12 +133,36 @@ class MotionPlatform(QObject):
                 if not packet.endswith("\n"):
                     packet += "\n"
                 self.serial.write(packet.encode("ascii"))
+                # print(packet)
         except Exception as e:
             self._status(f"Serial write error: {e}", "red")
 
     # ---------------------------------------------------------
     # Command/response interface
     # ---------------------------------------------------------
+    def initial_receive(self):
+        lines = []
+        empty_cycles = 0
+
+        while True:
+            raw = self.serial.readline()
+
+            if raw:
+                line = raw.decode(errors="ignore").strip()
+                if line:
+                    lines.append(line)
+                empty_cycles = 0  # reset because we received something
+
+            else:
+                empty_cycles += 1
+                time.sleep(0.01)
+
+                # stop after 100 ms of no new data
+                if empty_cycles > 10:
+                    break
+
+        return "\n".join(lines) if lines else None
+
     def send_receive(self, message: str, wait=False, resp=None):
         if not self.serial or not self.serial.is_open:
             self._status("Serial port not open", "red")
@@ -263,20 +296,13 @@ class MotionPlatform(QObject):
         # clamp dt to avoid rate spikes after pauses
         dt = min(dt, 0.1)
 
-        # rates
-        # negative sign: convert sim convention to platform convention
-        # TODO: Fix in new Teensy FW !!!!
-        # pitch_rate = -(pitch - self.prev_pitch) / dt
-        # roll_rate = -(roll - self.prev_roll) / dt
-        # yaw_rate = -(yaw - self.prev_yaw) / dt
+        pitch_rate_raw = -(pitch - self.prev_pitch) / dt
+        roll_rate_raw = -(roll - self.prev_roll) / dt
+        yaw_rate_raw = -(yaw - self.prev_yaw) / dt
 
         # Apply exponential filter
         if self.filter == 'exp_filter':
             alpha = 0.4  # smoothing factor (tune 0.1–0.3 -> the higher, the smoother)
-            pitch_rate_raw = -(pitch - self.prev_pitch) / dt
-            roll_rate_raw = -(roll - self.prev_roll) / dt
-            yaw_rate_raw = -(yaw - self.prev_yaw) / dt
-
             self.pitch_rate_smooth = (alpha * pitch_rate_raw + (1 - alpha) * self.pitch_rate_smooth)
             self.roll_rate_smooth = (alpha * roll_rate_raw + (1 - alpha) * self.roll_rate_smooth)
             self.yaw_rate_smooth = (alpha * yaw_rate_raw + (1 - alpha) * self.yaw_rate_smooth)
@@ -284,10 +310,6 @@ class MotionPlatform(QObject):
             roll_rate = self.roll_rate_smooth
             yaw_rate = self.yaw_rate_smooth
         elif self.filter == 'kal_filter':
-            pitch_rate_raw = -(pitch - self.prev_pitch) / dt
-            roll_rate_raw = -(roll - self.prev_roll) / dt
-            yaw_rate_raw = -(yaw - self.prev_yaw) / dt
-
             # Kalman filter update for pitch rate
             self.kf_pitch_rate, self.kf_pitch_P = self._kalman_update(
                 self.kf_pitch_rate,
@@ -318,6 +340,10 @@ class MotionPlatform(QObject):
             pitch_rate = self.kf_pitch_rate
             roll_rate = self.kf_roll_rate
             yaw_rate = self.kf_yaw_rate
+        else:
+            pitch_rate = pitch_rate_raw
+            roll_rate = roll_rate_raw
+            yaw_rate = yaw_rate_raw
 
         # calc update rate
         update_rate = 1 / dt

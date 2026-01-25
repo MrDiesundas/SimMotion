@@ -670,6 +670,9 @@
       </property>
      </widget>
      <widget class="QDial" name="sld_yaw">
+      <property name="enabled">
+       <bool>false</bool>
+      </property>
       <property name="geometry">
        <rect>
         <x>150</x>
@@ -743,6 +746,9 @@
       </property>
      </widget>
      <widget class="QLabel" name="lbl_sld_yaw">
+      <property name="enabled">
+       <bool>false</bool>
+      </property>
       <property name="geometry">
        <rect>
         <x>220</x>
@@ -824,6 +830,9 @@
       </property>
      </widget>
      <widget class="QLabel" name="lbl_sld_pitch_4">
+      <property name="enabled">
+       <bool>false</bool>
+      </property>
       <property name="geometry">
        <rect>
         <x>190</x>
@@ -1377,6 +1386,9 @@ li.checked::marker { content: &quot;\2612&quot;; }
      </widget>
     </widget>
     <widget class="QGroupBox" name="grp_yaw_axes">
+     <property name="enabled">
+      <bool>false</bool>
+     </property>
      <property name="geometry">
       <rect>
        <x>30</x>
@@ -1570,6 +1582,9 @@ li.checked::marker { content: &quot;\2612&quot;; }
      </property>
     </widget>
     <widget class="QCheckBox" name="ckb_yaw_axes">
+     <property name="enabled">
+      <bool>false</bool>
+     </property>
      <property name="geometry">
       <rect>
        <x>10</x>
@@ -1894,7 +1909,7 @@ li.checked::marker { content: &quot;\2612&quot;; }
      <x>10</x>
      <y>551</y>
      <width>491</width>
-     <height>20</height>
+     <height>41</height>
     </rect>
    </property>
    <property name="text">
