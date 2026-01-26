@@ -35,24 +35,30 @@ V4.0.0 - 25.01.2025:
     - changed to position control -> MUST USE SimMotion4.ino or higher
     - removed Kalman filter from motion platform -> now in teensy
     - changed timer to be flight time clock
+V4.0.1 - 26.01.2025:
+    - wait for response on motion_power_toggle (avoid jump at homing)
+    - implement logger by hitting the button Nr 8
+    - own class to analyze log
+    - changed gains from teensy to Kp:12, Ki:0.5
+    - implement debug flag for timing in xplane listener, imu and motion platform class
 """
 
 # TODO: update_sliders_from_response and sliders_update_from_response
 # TODO: eliminate yaw
 # TODO: cleanup avoid double function
+# TODO: avoid too long logs -> limit it
+# TODO: check motion compensation error
 
 
 import sys
 import os
 import time
 import threading
-from datetime import datetime
 import configparser
-
+import queue  # for logger
 
 from PySide6.QtWidgets import QApplication, QMainWindow
 from PySide6.QtCore import Signal, QTimer, QMetaObject, Qt, Q_ARG
-from PySide6.QtGui import QPixmap
 
 import qdarktheme
 
@@ -62,9 +68,10 @@ from src.msfs_listener import MSFSListener
 from src.xplane_listener import XPlaneListener
 from src.maxflightstick import FlightStick
 from src.key_helper import KeyHelper, VK_CONTROL, VK_INSERT
+from src.motion_logger import MotionLogAnalyzer
 
 
-VERSION = "v4.0.0 - 25.01.2025"
+VERSION = "v4.0.1 - 26.01.2025"
 BAUD_RATE = 115200
 CONFIG_FILE = "config.ini"
 DEVELOPMENT = False
@@ -99,6 +106,7 @@ from ui_SimMotion import Ui_SimMotion # the generated file
 class MyWindow(QMainWindow):
     button7_pressed = Signal()
     button9_pressed = Signal()
+    button8_pressed = Signal()
 
     def __init__(self):
         super().__init__()
@@ -154,6 +162,12 @@ class MyWindow(QMainWindow):
         self.gui_timer = QTimer(self)
         self.gui_timer.timeout.connect(self.gui_refresh)
         self.gui_timer.start(1000)
+
+        # log
+        self.log_queue = queue.Queue()
+        self.log_write = False
+        self.log_file = 'SimMotion.csv'
+        self.log_file_handle = None
 
         #TODO INCLUDE
         self.stick = None
@@ -304,8 +318,32 @@ class MyWindow(QMainWindow):
 
 
     # ---------------- IMU callback ----------------
+    def imu_handle_update(self, imu_packet):
+        # Store for logging
+        self.latest_imu = imu_packet
+        self.log_queue.put(imu_packet)
 
-    def imu_handle_update(self, roll_adj, pitch_adj, yaw_adj):
+        # GUI updates
+        QMetaObject.invokeMethod(
+            self.ui.lbl_IMU_roll,
+            "setText",
+            Qt.QueuedConnection,
+            Q_ARG(str, f"{imu_packet['roll']:.2f}"),
+        )
+        QMetaObject.invokeMethod(
+            self.ui.lbl_IMU_pitch,
+            "setText",
+            Qt.QueuedConnection,
+            Q_ARG(str, f"{imu_packet['pitch']:.2f}"),
+        )
+        QMetaObject.invokeMethod(
+            self.ui.lbl_IMU_yaw,
+            "setText",
+            Qt.QueuedConnection,
+            Q_ARG(str, f"{imu_packet['yaw']:.2f}"),
+        )
+
+    def imu_handle_update_OLD(self, roll_adj, pitch_adj, yaw_adj):
         """
         Called by WitMotionSensor for each new IMU sample (offset-corrected rig angles in degrees).
         WitMotionSensor itself writes to MMF for MotionCompensation; here we only update the GUI.
@@ -437,6 +475,7 @@ class MyWindow(QMainWindow):
     def _start_flightstick(self):
         self.button7_pressed.connect(self.motion_stream_toggle)
         self.button9_pressed.connect(self.VR_motion_compensation_trigger)
+        self.button8_pressed.connect(self.log_toggle)
         try:
             self.stick = FlightStick()
         except Exception:
@@ -447,6 +486,8 @@ class MyWindow(QMainWindow):
         self.stick.on_press(7, lambda: self.button7_pressed.emit())
         # button 9 trigger motion compensation
         self.stick.on_press(9, lambda: self.button9_pressed.emit())
+        # button 8 toggle log file
+        self.stick.on_press(8, lambda: self.button8_pressed.emit())
 
     def connection_disconnect_all(self):
         self.update_status("Disconnecting...")
@@ -504,6 +545,85 @@ class MyWindow(QMainWindow):
         self.ui.lbl_status.setText(str(txt))
         QApplication.processEvents()
         print(txt)
+
+    # ---------------- Log ----------------
+
+    def start_logger_thread(self):
+        self.logger_running = True
+        self.logger_thread = threading.Thread(target=self.logger_loop, daemon=True)
+        self.logger_thread.start()
+
+    def logger_loop(self):
+        while self.logger_running:
+            try:
+                packet = self.log_queue.get(timeout=0.1)
+                self._log_packet(packet)
+            except queue.Empty:
+                pass
+
+    def log_toggle(self):
+        """
+        Toggle motion-data logging on/off.
+        Opens or closes the CSV file and updates:
+            self.log_write
+            self.log_file_handle
+        """
+        # --- TURN LOGGING OFF ---
+        if self.log_write:
+            # Stop writing
+            self.log_write = False
+            self.logger_running = False
+            self.logger_thread.join(timeout=1.0)
+
+            # Close file handle safely
+            if self.log_file_handle is not None:
+                try:
+                    self.log_file_handle.flush()
+                    self.log_file_handle.close()
+                except Exception as e:
+                    print(f"[LOG] Error closing log file: {e}")
+                try:
+                    analyzer = MotionLogAnalyzer(self.log_file)
+                    analyzer.analyze()
+                except Exception as e:
+                    print(f"[LOG] Analyse fails: {e}")
+
+            self.log_file_handle = None
+            print("[LOG] Motion logging disabled.")
+            return
+
+        # --- TURN LOGGING ON ---
+        try:
+            # Open file in append mode so sessions accumulate
+            self.log_file_handle = open(self.log_file, "w", newline="")
+            self.log_write = True
+            self.start_logger_thread()
+            print(f"[LOG] Motion logging enabled → writing to {self.log_file}")
+        except Exception as e:
+            self.log_write = False
+            self.log_file_handle = None
+            print(f"[LOG] Failed to open log file '{self.log_file}': {e}")
+
+    def _log_packet(self, data):
+        """
+        Writes a single line:
+        timestamp; source; pitch; roll; yaw
+        Only if all required fields exist.
+        """
+        if not data:
+            return
+
+        ts = data.get("timestamp")
+        src = data.get("source")
+        pitch = data.get("pitch")
+        roll = data.get("roll")
+        yaw = data.get("yaw")
+
+        if ts is None or src is None or pitch is None or roll is None or yaw is None:
+            return
+
+        line = f"{ts:.6f};{src};{pitch:.3f};{roll:.3f};{yaw:.3f}\n"
+        self.log_file_handle.write(line)
 
     # ---------------- MOTION PLATFORM ----------------
     def hms_to_seconds(self, hms: str) -> int:
@@ -603,7 +723,7 @@ class MyWindow(QMainWindow):
             self.motion_timer.stop()
             resp = self.motion_platform.send_receive('C;0', wait=True)
             self.ui.btn_motion.setChecked(False)
-            # self.motion_power_toggle(False)
+            self.motion_power_toggle(False)
             self.motion_platform.set_enabled(False)
             self.stream_to_platform = False
             self.ui.btn_home.setChecked(False)
@@ -621,7 +741,8 @@ class MyWindow(QMainWindow):
     def motion_power_toggle(self, checked: bool):
         if self.connected and self.motion_platform is not None:
             self.ui.btn_axes.setChecked(checked)
-            self.motion_platform.send_receive("M;1" if checked else "M;0")
+            cmd = "M;1" if checked else "M;0"
+            self.motion_platform.send_receive(cmd, wait=True)
             self.ui.btn_axes.setText("ON" if checked else "OFF")
             if not checked:
                 self.homing_done = False
@@ -682,9 +803,11 @@ class MyWindow(QMainWindow):
     # ---------------- GUI updates ----------------
     def gui_update_incoming(self, data: dict):
         self.latest_incoming = data
+        self.log_queue.put(data)
 
     def gui_update_outgoing(self, data: dict):
         self.latest_outgoing = data
+        self.log_queue.put(data)
 
     def gui_refresh(self):
         # Incoming telemetry (sim)

@@ -49,6 +49,10 @@ class WitMotionSensor:
 
         self.last_time = time.time()
 
+        # Debug: measure IMU update rate
+        self.debug = False
+        self.temp_imu_rate = []
+
         # connection state
         self.is_open = False
         self.thread = None
@@ -131,12 +135,36 @@ class WitMotionSensor:
     # ---------------------------------------------------------
     # Main update loop
     # ---------------------------------------------------------
+    def unwrap_angle(self, prev, current):
+        delta = current - prev
+        if delta > 180:
+            current -= 360
+        elif delta < -180:
+            current += 360
+        return current
 
     def update(self):
         """Read IMU, apply offsets, integrate translation, write to MMF."""
         now = time.time()
         dt = now - self.last_time
         self.last_time = now
+
+        # --- Debug: measure IMU update rate ---
+        if self.debug:
+            self.temp_imu_rate.append(now)
+
+            if len(self.temp_imu_rate) >= 100:
+                diffs = [
+                    self.temp_imu_rate[i] - self.temp_imu_rate[i - 1]
+                    for i in range(1, len(self.temp_imu_rate))
+                ]
+                avg_dt = sum(diffs) / len(diffs)
+                hz = 1.0 / avg_dt if avg_dt > 0 else 0
+
+                print(f"[DEBUG] IMU update rate: {hz:.1f} Hz "
+                      f"(avg dt = {avg_dt * 1000:.2f} ms)")
+
+                self.temp_imu_rate.clear()
 
         # --- 1) Read IMU orientation ---
         roll, pitch, yaw = self.imu.get_angle()
@@ -150,9 +178,16 @@ class WitMotionSensor:
             return
 
         # apply offsets
-        roll_adj = roll - self.roll_offset
-        pitch_adj = pitch - self.pitch_offset
-        yaw_adj = yaw - self.yaw_offset
+        # roll_adj = roll - self.roll_offset
+        # pitch_adj = -(pitch - self.pitch_offset)  # TODO CHECK
+        # yaw_adj = -(yaw - self.yaw_offset) # TODO CHECK
+        roll_adj = roll + 180
+        pitch_adj = -pitch
+        yaw_adj = yaw
+
+        if roll_adj > 180:
+            roll_adj = roll_adj - 360
+
 
         # --- 2) Read acceleration ---
         ax, ay, az = self.imu.get_acceleration()
@@ -188,6 +223,8 @@ class WitMotionSensor:
                 yaw_adj, roll_adj, pitch_adj,
                 0.0, 0.0, 0.0
             )
+
+
         except Exception:
             # MMF was closed by MotionComp (CTRL+INS deactivation)
             self.mmf_valid = False
@@ -197,5 +234,16 @@ class WitMotionSensor:
 
         # --- 5) GUI callback ---
         if self.imu_callback:
-            self.imu_callback(roll_adj, pitch_adj, yaw_adj)
+            imu_packet = {
+                "timestamp": time.time(),
+                "source": "imu",
+                "pitch": pitch_adj,
+                "roll": roll_adj,
+                "yaw": yaw_adj,
+            }
+            self.imu_callback(imu_packet)
+
+        # # --- 5) GUI callback ---
+        # if self.imu_callback:
+        #     self.imu_callback(roll_adj, pitch_adj, yaw_adj)
 

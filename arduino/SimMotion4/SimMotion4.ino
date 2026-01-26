@@ -78,10 +78,10 @@ elapsedMicros controlTimer;
 const uint32_t CONTROL_PERIOD_US = 1000; // 1 kHz
 
 // PD gains (tune as needed)
-float Kp_pitch = 8.0f;
-float Kd_pitch = 0.35f;
-float Kp_roll  = 8.0f;
-float Kd_roll  = 0.35f;
+float Kp_pitch = 12.0f;
+float Kd_pitch = 0.5f;
+float Kp_roll  = 12.0f;
+float Kd_roll  = 0.5f;
 
 // for derivative term
 float pitchErr_prev = 0.0f;
@@ -619,6 +619,7 @@ void loop() {
         motionPowerToggle = atoi(buffer + 2);
         if (motionPowerToggle == 1) {
           digitalWrite(RELAY_PIN, HIGH);
+          delay(1000); // give time to power and initial
           Serial.println("M;ON");
         } else {
           digitalWrite(RELAY_PIN, LOW);

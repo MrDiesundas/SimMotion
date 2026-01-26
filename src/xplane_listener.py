@@ -33,6 +33,11 @@ class XPlaneListener(QObject):
         self.packet_counter = 0
         self.rate_timer = time.time()
 
+        # debug data speed
+        self.debug = False
+        self.temp_rate = []
+
+
     # ---------- helpers ----------
 
     def _status(self, txt: str, color: str | None = None):
@@ -154,13 +159,33 @@ class XPlaneListener(QObject):
         if not self.telemetry_callback:
             return
 
+        now = time.time()
+
+        # --- Measure incoming telemetry rate ---
+        if self.debug:
+
+            self.temp_rate.append(now)
+            if len(self.temp_rate) >= 100:
+                # Compute time differences between consecutive samples
+                diffs = [
+                    self.temp_rate[i] - self.temp_rate[i - 1]
+                    for i in range(1, len(self.temp_rate))
+                ]
+                avg_dt = sum(diffs) / len(diffs)
+                hz = 1.0 / avg_dt if avg_dt > 0 else 0
+                print(f"[DEBUG] Sim update rate: {hz:.1f} Hz (avg dt = {avg_dt * 1000:.2f} ms)")
+                # Reset buffer
+                self.temp_rate.clear()
+
+        # --- build data package ---
         data = {
+            "timestamp": now,
+            "source": "incoming",
             "pitch": result["pitch"],
             "roll": result["roll"],
             "yaw": result["yaw"],
             "airspeed": result["airspeed"],
             "frame_rate": result["frame_rate"],
-            "timestamp": time.time(),
         }
 
         # 1) Send to motion platform (callback)

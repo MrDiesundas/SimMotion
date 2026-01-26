@@ -55,6 +55,10 @@ class MotionPlatform(QObject):
         # Q = 1.0, R = 3 → more responsive (hard, rumbling)
         # Q = 0.5, R = 5 → good general‑purpose   setting
 
+        # Debug speed
+        self.debug = False
+        self.temp_send_rate = []
+
         print("MotionPlatform received stop_stream_callback =", stop_stream_callback)
 
     # ---------- helpers ----------
@@ -128,6 +132,41 @@ class MotionPlatform(QObject):
         if not self.streaming_enabled:
             return
 
+        # --- Measure outgoing send rate ---
+        if self.debug:
+            now = time.time()
+            self.temp_send_rate.append(now)
+
+            if len(self.temp_send_rate) >= 100:
+                diffs = [
+                    self.temp_send_rate[i] - self.temp_send_rate[i - 1]
+                    for i in range(1, len(self.temp_send_rate))
+                ]
+                avg_dt = sum(diffs) / len(diffs)
+                hz = 1.0 / avg_dt if avg_dt > 0 else 0
+
+                print(f"[DEBUG] MotionPlatform send rate: {hz:.1f} Hz "
+                      f"(avg dt = {avg_dt * 1000:.2f} ms)")
+
+                self.temp_send_rate.clear()
+
+        try:
+            with self.serial_lock:
+                if not packet.endswith("\n"):
+                    packet += "\n"
+                self.serial.write(packet.encode("ascii"))
+        except Exception as e:
+            self._status(f"Serial write error: {e}", "red")
+
+    def _send_packet_OLD(self, packet: str):
+        if not self.serial or not self.serial.is_open:
+            return
+
+        if not self.streaming_enabled:
+            return
+
+
+
         try:
             with self.serial_lock:
                 if not packet.endswith("\n"):
@@ -162,6 +201,7 @@ class MotionPlatform(QObject):
                     break
 
         return "\n".join(lines) if lines else None
+
 
     def send_receive(self, message: str, wait=False, resp=None):
         if not self.serial or not self.serial.is_open:
@@ -404,6 +444,8 @@ class MotionPlatform(QObject):
                 self.stop_stream_callback()  # <--- STOP STREAM
 
         return {
+            "timestamp": time.time(),
+            "source": "outgoing",
             "pitch": pitch,
             "roll": roll,
             "yaw": yaw,
